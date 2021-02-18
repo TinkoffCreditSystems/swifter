@@ -61,17 +61,14 @@ open class HttpRouter {
     public func route(_ method: String?, path: String) -> ([String: String], (HttpRequest) -> HttpResponse)? {
 
         return queue.sync {
+            var pathSegments: String
             if let method = method {
-                let pathSegments = (method + "/" + stripQuery(path)).split("/")
-                var pathSegmentsGenerator = pathSegments.makeIterator()
-                var params = [String: String]()
-                if let handler = findHandler(&rootNode, params: &params, generator: &pathSegmentsGenerator) {
-                    return (params, handler)
-                }
+                pathSegments = method + "/"
+            } else {
+                pathSegments = "*/"
             }
-
-            let pathSegments = ("*/" + stripQuery(path)).split("/")
-            var pathSegmentsGenerator = pathSegments.makeIterator()
+            //pathSegments += stripQuery(path)
+            var pathSegmentsGenerator = pathSegments.split("/").makeIterator()
             var params = [String: String]()
             if let handler = findHandler(&rootNode, params: &params, generator: &pathSegmentsGenerator) {
                 return (params, handler)
@@ -123,7 +120,7 @@ open class HttpRouter {
         if index < count, let pathToken = pattern[index].removingPercentEncoding {
 
             var currentIndex = index + 1
-            let variableNodes = node.nodes.filter { $0.0.first == ":" }
+            let variableNodes = node.nodes.filter { $0.key.first == ":" }
             if let variableNode = variableNodes.first {
                 if currentIndex == count && variableNode.1.isEndOfRoute {
                     // if it's the last element of the pattern and it's a variable, stop the search and
