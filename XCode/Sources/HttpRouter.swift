@@ -20,7 +20,10 @@ open class HttpRouter {
         var isEndOfRoute: Bool = false
 
         /// The closure to handle the route
+        // укутать в квери словарь
         var handler: ((HttpRequest) -> HttpResponse)?
+        // может быть разный набор квериков, надо учесть потом, сделац массив мап
+        var queryParams: [String: String]?
     }
 
     private var rootNode = Node()
@@ -49,23 +52,25 @@ open class HttpRouter {
 
     public func register(_ method: String?, path: String, handler: ((HttpRequest) -> HttpResponse)?) {
         var pathSegments = stripQuery(path).split("/")
+        let queryParams = getQuery(path)
         if let method = method {
             pathSegments.insert(method, at: 0)
         } else {
             pathSegments.insert("*", at: 0)
         }
         var pathSegmentsGenerator = pathSegments.makeIterator()
-        inflate(&rootNode, generator: &pathSegmentsGenerator).handler = handler
+        inflate(&rootNode, generator: &pathSegmentsGenerator, queryParams: queryParams).handler = handler
     }
 
     public func route(_ method: String?, path: String) -> ([String: String], (HttpRequest) -> HttpResponse)? {
 
         return queue.sync {
+            let queryParams = getQuery(path)
             if let method = method {
                 let pathSegments = (method + "/" + stripQuery(path)).split("/")
                 var pathSegmentsGenerator = pathSegments.makeIterator()
                 var params = [String: String]()
-                if let handler = findHandler(&rootNode, params: &params, generator: &pathSegmentsGenerator) {
+                if let handler = findHandler(&rootNode, params: &params, generator: &pathSegmentsGenerator, queryParams: queryParams) {
                     return (params, handler)
                 }
             }
@@ -73,7 +78,7 @@ open class HttpRouter {
             let pathSegments = ("*/" + stripQuery(path)).split("/")
             var pathSegmentsGenerator = pathSegments.makeIterator()
             var params = [String: String]()
-            if let handler = findHandler(&rootNode, params: &params, generator: &pathSegmentsGenerator) {
+            if let handler = findHandler(&rootNode, params: &params, generator: &pathSegmentsGenerator, queryParams: queryParams) {
                 return (params, handler)
             }
 
@@ -81,7 +86,7 @@ open class HttpRouter {
         }
     }
 
-    private func inflate(_ node: inout Node, generator: inout IndexingIterator<[String]>) -> Node {
+    private func inflate(_ node: inout Node, generator: inout IndexingIterator<[String]>, queryParams: [String: String]?) -> Node {
 
         var currentNode = node
 
@@ -95,16 +100,26 @@ open class HttpRouter {
         }
 
         currentNode.isEndOfRoute = true
+        currentNode.queryParams = queryParams
         return currentNode
     }
 
-    private func findHandler(_ node: inout Node, params: inout [String: String], generator: inout IndexingIterator<[String]>) -> ((HttpRequest) -> HttpResponse)? {
+    private func findHandler(_ node: inout Node,
+                             params: inout [String: String],
+                             generator: inout IndexingIterator<[String]>,
+                             queryParams: [String: String]?) -> ((HttpRequest) -> HttpResponse)? {
 
         var matchedRoutes = [Node]()
         let pattern = generator.map { $0 }
         let numberOfElements = pattern.count
 
-        findHandler(&node, params: &params, pattern: pattern, matchedNodes: &matchedRoutes, index: 0, count: numberOfElements)
+        findHandler(&node,
+                    params: &params,
+                    pattern: pattern,
+                    matchedNodes: &matchedRoutes,
+                    index: 0,
+                    count: numberOfElements,
+                    queryParams: queryParams)
         return matchedRoutes.first?.handler
     }
 
@@ -118,7 +133,13 @@ open class HttpRouter {
     ///   - matchedNodes: An array with the nodes matching the route
     ///   - index: The index of current position in the generator
     ///   - count: The number of elements if the route to match
-    private func findHandler(_ node: inout Node, params: inout [String: String], pattern: [String], matchedNodes: inout [Node], index: Int, count: Int) {
+    private func findHandler(_ node: inout Node,
+                             params: inout [String: String],
+                             pattern: [String],
+                             matchedNodes: inout [Node],
+                             index: Int,
+                             count: Int,
+                             queryParams: [String: String]?) {
 
         if index < count, let pathToken = pattern[index].removingPercentEncoding {
 
@@ -139,15 +160,15 @@ open class HttpRouter {
                     return
                 }
                 params[variableNode.0] = pathToken
-                findHandler(&node.nodes[variableNode.0]!, params: &params, pattern: pattern, matchedNodes: &matchedNodes, index: currentIndex, count: count)
+                findHandler(&node.nodes[variableNode.0]!, params: &params, pattern: pattern, matchedNodes: &matchedNodes, index: currentIndex, count: count, queryParams: queryParams)
             }
 
             if var node = node.nodes[pathToken] {
-                findHandler(&node, params: &params, pattern: pattern, matchedNodes: &matchedNodes, index: currentIndex, count: count)
+                findHandler(&node, params: &params, pattern: pattern, matchedNodes: &matchedNodes, index: currentIndex, count: count, queryParams: queryParams)
             }
 
             if var node = node.nodes["*"] {
-                findHandler(&node, params: &params, pattern: pattern, matchedNodes: &matchedNodes, index: currentIndex, count: count)
+                findHandler(&node, params: &params, pattern: pattern, matchedNodes: &matchedNodes, index: currentIndex, count: count, queryParams: queryParams)
             }
 
             if let startStarNode = node.nodes["**"] {
@@ -156,7 +177,7 @@ open class HttpRouter {
                 while currentIndex < count, let pathToken = pattern[currentIndex].removingPercentEncoding {
                     currentIndex += 1
                     if startStarNodeKeys.contains(pathToken) {
-                        findHandler(&startStarNode.nodes[pathToken]!, params: &params, pattern: pattern, matchedNodes: &matchedNodes, index: currentIndex, count: count)
+                        findHandler(&startStarNode.nodes[pathToken]!, params: &params, pattern: pattern, matchedNodes: &matchedNodes, index: currentIndex, count: count, queryParams: queryParams)
                     }
                 }
             }
@@ -164,6 +185,15 @@ open class HttpRouter {
 
         if node.isEndOfRoute && index == count {
             // if it's the last element and the path to match is done then it's a pattern matching
+            if let queryParams = queryParams {
+                // проверить является ли одно подмножеством другого, чтобы не учитывать все кверики
+                if node.queryParams == queryParams {
+                    matchedNodes.append(node)
+                    return
+                } else {
+                    return
+                }
+            }
             matchedNodes.append(node)
             return
         }
@@ -174,6 +204,19 @@ open class HttpRouter {
             return path
         }
         return path
+    }
+    
+    private func getQuery(_ path: String) -> [String: String]? {
+        if path.contains("?"), let query = path.components(separatedBy: "?").last {
+            let queryArray = query.components(separatedBy: "&").map {
+                ($0.components(separatedBy: "=").first!, $0.components(separatedBy: "=").last!)
+            }
+            let result = queryArray.reduce(into: [:]) { dict, elem in
+                dict[elem.0] = elem.1
+            }
+            return result
+        }
+        return nil
     }
 }
 

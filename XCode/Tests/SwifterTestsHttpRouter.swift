@@ -34,27 +34,26 @@ class SwifterTestsHttpRouter: XCTestCase {
 
     func testHttpRouterSimplePathSegments() {
 
-        router.register(nil, path: "/a/b/c/d", handler: { _ in
+        router.register(nil, path: "/a?x=y&a=b", handler: { _ in
             return .ok(.htmlBody("OK"))
         })
-
-        XCTAssertNil(router.route(nil, path: "/"))
-        XCTAssertNil(router.route(nil, path: "/a"))
-        XCTAssertNil(router.route(nil, path: "/a/b"))
-        XCTAssertNil(router.route(nil, path: "/a/b/c"))
-        XCTAssertNotNil(router.route(nil, path: "/a/b/c/d"))
+        router.register(nil, path: "/tinkoff.ru", handler: { _ in
+            return .ok(.htmlBody("OK"))
+        })
+        XCTAssertNil(router.route(nil, path: "/tinkoff.ru?a=1"))
+        XCTAssertNotNil(router.route(nil, path: "/a?x=y&a=b"))
+        XCTAssertNil(router.route(nil, path: "/a?z=y"))
     }
 
     func testHttpRouterSinglePathSegmentWildcard() {
 
-        router.register(nil, path: "/a/*/c/d", handler: { _ in
+        router.register(nil, path: "/a/*/c", handler: { _ in
             return .ok(.htmlBody("OK"))
         })
-
+        XCTAssertNotNil(router.route(nil, path: "/a/foo/c"))
+        XCTAssertNotNil(router.route(nil, path: "/a/b/c"))
         XCTAssertNil(router.route(nil, path: "/"))
         XCTAssertNil(router.route(nil, path: "/a"))
-        XCTAssertNotNil(router.route(nil, path: "/a/foo/c/d"))
-        XCTAssertNotNil(router.route(nil, path: "/a/b/c/d"))
         XCTAssertNil(router.route(nil, path: "/a/b"))
         XCTAssertNil(router.route(nil, path: "/a/b/foo/d"))
     }
